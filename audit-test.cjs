@@ -1,0 +1,44 @@
+const assert=require('node:assert/strict'),vm=require('node:vm'),fs=require('node:fs');
+const {inspectStock}=require('./detector.js');
+const {clickPurchase,classifyCart}=require('./cart.js');
+let clicks=0,icon=true,quantity='1';
+const button={tagName:'BUTTON',innerText:'Pre-purchase',getClientRects:()=>[{}],matches:()=>false,closest:()=>null,getAttribute:()=>null,querySelector:()=>icon?{}:null,click:()=>clicks++};
+const counter={getClientRects:()=>[{}],parentElement:{querySelector:()=>({textContent:quantity})}};
+global.document={querySelectorAll:s=>s==='#primary'?[button]:s==='button[aria-label="Subtract item"]'?[counter]:[],getElementById:()=>null};
+global.getComputedStyle=()=>({visibility:'visible',display:'block',opacity:'1'});
+global.location={href:'https://www.nintendo.com/us/store/products/the-legend-of-zelda-ocarina-of-time-125697/',hostname:'www.nintendo.com'};
+global.ensureFulfillment=()=>({ready:true});
+const rule={store:'Nintendo'};
+assert.equal(inspectStock('#primary',rule).found,true,'physical Pre-purchase is detected');
+assert.equal(clickPurchase('#primary',location.href,'nintendo-one',rule).clicked,true);
+assert.equal(clickPurchase('#primary',location.href,'nintendo-one',rule).clicked,false,'one attempt token cannot repeat');
+assert.equal(clicks,1);
+quantity='2';assert.equal(clickPurchase('#primary',location.href,'two',rule).clicked,false);quantity='1';
+icon=false;assert.equal(inspectStock('#primary',rule).found,false);
+assert.equal(clickPurchase('#primary',location.href,'no-icon',rule).clicked,false);
+icon=true;button.tagName='A';assert.equal(inspectStock('#primary',rule).found,false,'digital purchase links are excluded');
+button.tagName='BUTTON';button.form={};assert.equal(clickPurchase('#primary',location.href,'form',rule).clicked,false);
+button.form=null;button.getAttribute=n=>n==='formaction'?'/checkout/place-order':null;
+assert.equal(clickPurchase('#primary',location.href,'order',rule).clicked,false);
+for(const text of ['reCAPTCHA','protected by reCAPTCHA'])assert.equal(classifyCart([text,'Added to the cart']).state,'confirmed','passive CAPTCHA badge is not a challenge');
+for(const text of ['Complete the CAPTCHA','reCAPTCHA challenge expires in two minutes',"Press & hold to confirm you're not a bot"])
+  assert.equal(classifyCart([text,'Added to cart']).reason,'bot');
+assert.equal(classifyCart(['Your Shopping Cart is Empty']).state,'unavailable');
+assert.equal(classifyCart(['Quantity: 0','Added to cart']).state,'unavailable');
+assert.equal(classifyCart(['Sign in to add to cart']).state,'attention');
+for(const k of ['document','getComputedStyle','location','ensureFulfillment'])delete global[k];
+let callback,cleared=0,sends=0,available=false,gate='';
+const context=vm.createContext({location:{href:'https://store.example/product'},clearInterval:()=>cleared++,setInterval:fn=>{callback=fn;return 1},
+  resolveProductButton:()=>({selector:available?'#primary':''}),inspectStock:()=>({found:available,label:'Pre-order'}),pageAttention:()=>gate,
+  chrome:{runtime:{sendMessage:async()=>{sends++;}}}});
+vm.runInContext(fs.readFileSync(__dirname+'/availability.js','utf8'),context);
+vm.runInContext("observeAvailability('https://store.example/product',{},'')",context);
+callback();assert.equal(sends,0);
+available=true;callback();assert.equal(sends,1,'late rendering wakes the watch');
+callback();assert.equal(sends,1,'unchanged DOM does not flood worker queue');
+gate={reason:'queue',detail:"You're in line"};callback();assert.equal(sends,2,'queue appearance wakes the watch');
+const before=cleared;context.location.href='https://store.example/cart';callback();assert.ok(cleared>before);assert.equal(sends,2);
+context.location.href='https://store.example/product';context.bestBuySoldOut=()=>({unavailable:true,modal:true});available=false;gate='';
+vm.runInContext("observeAvailability('https://store.example/product',{store:'Best Buy',productId:'6691841'},'')",context);
+callback();assert.equal(sends,3,'sold-out dialog wakes a paused queue watch even with no enabled preorder button');
+console.log('PASS: Nintendo physical preorder guard, single click, passive badge vs challenge, rejection priority, late availability and queue observer');

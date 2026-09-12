@@ -1,0 +1,27 @@
+const assert=require('node:assert/strict'),vm=require('node:vm'),fs=require('node:fs');
+const {harness}=require('./control-audit-test.cjs');
+let busy=false,error=true;
+const row={parentElement:null,querySelectorAll:()=>error?[{innerText:'The requested quantity is not available.',getClientRects:()=>[{}]}]:[]};
+const button={innerText:'Pre-purchase',getClientRects:()=>[{}],querySelector:()=>({}),matches:()=>busy,closest:()=>null,parentElement:row};
+const url='https://www.nintendo.com/us/store/products/console/';
+const c=vm.createContext({location:{hostname:'www.nintendo.com',href:url},document:{querySelectorAll:()=>[button]},getComputedStyle:()=>({visibility:'visible',display:'block'})});
+vm.runInContext(fs.readFileSync(__dirname+'/cart.js','utf8'),c);
+assert.equal(vm.runInContext(`inspectNintendoRejection(${JSON.stringify(url)})`,c),true);
+busy=true;assert.equal(vm.runInContext(`inspectNintendoRejection(${JSON.stringify(url)})`,c),false);busy=false;
+error=false;assert.equal(vm.runInContext(`inspectNintendoRejection(${JSON.stringify(url)})`,c),false);
+(async()=>{
+ const h=await harness();h.add(1,url,{autoCart:true,pending:true,paused:true,token:'first',started:vm.runInContext('Date.now()',h.context)});
+ const original=h.chrome.scripting.executeScript;
+ h.chrome.scripting.executeScript=async req=>req.func?.name==='inspectNintendoRejection'?[{result:true}]:original(req);
+ await h.scan(1);assert.equal(h.db['watch:1'].nintendoRetry,true,'explicit rejection retries without waiting for refresh interval');assert.equal(h.db['watch:1'].paused,false);
+ h.state.found=true;h.advance(1);await h.chrome.alarms.onAlarm.fn({name:'refresh:1'});
+ assert.equal(h.events.filter(e=>e[0]==='reload').length,0,'retry uses current first-step button without reloading');
+ assert.equal(h.events.filter(e=>e[0]==='action'&&e[2]==='purchase').length,1);
+ assert.equal(h.events.filter(e=>e[0]==='notice').length,0,'rejected attempts do not alert repeatedly');
+ h.tabs[1].url='https://www.nintendo.com/us/cart/';await h.scan(1);
+ assert.equal(h.db['watch:1'].paused,true);assert.equal(h.db['watch:1'].pending,false);assert.equal(h.db['watch:1'].nintendoRetry,false);
+ h.tabs[1].url=url;h.advance(10000);await h.chrome.alarms.onAlarm.fn({name:'refresh:1'});await h.scan(1);
+ assert.equal(h.events.filter(e=>e[0]==='action'&&e[2]==='purchase').length,1,'returning to product after handoff never reactivates retries');
+ await h.call({type:'pause',id:1});h.advance(5000);await h.scan(1);assert.equal(h.db['watch:1'].userPaused,true);
+ console.log('PASS: scoped Nintendo rejection, busy protection, interval retry without reload, no alert spam and manual pause');
+})().catch(e=>{console.error(e);process.exitCode=1;});

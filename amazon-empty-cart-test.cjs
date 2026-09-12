@@ -1,0 +1,26 @@
+const assert=require('node:assert/strict'),vm=require('node:vm');
+const {harness}=require('./control-audit-test.cjs');
+const {inspectAmazonPage}=require('./amazon.js');
+(async()=>{
+  const h=await harness(),url='https://www.amazon.com/dp/B0HJ6F8L6V';
+  h.add(1,url,{autoCart:true,pending:true,paused:true,amazonStage:'cart',token:'old',started:Date.now()});
+  h.tabs[1].url='https://www.amazon.com/cart';h.state.pages[1]={page:'cart',state:'unavailable',reason:'emptyCart'};
+  await vm.runInContext('get(1).then(w=>readOutcome(w))',h.context);
+  assert.equal(h.tabs[1].url,url);assert.equal(h.db['watch:1'].paused,false);assert.equal(h.db['watch:1'].amazonIgnoreCartBadge,true);
+  assert.equal(h.db['watch:1'].retryAt,vm.runInContext('Date.now()+5000',h.context));
+  h.state.pages[1]={page:'product',state:'pending',title:'Console',hasCartItems:true,cartUrl:'https://www.amazon.com/cart'};h.state.found=true;
+  await h.scan(1);assert.equal(h.db['watch:1'].pending,false,'product return does not immediately click again');
+  h.advance(10000);await h.scan(1);
+  assert.equal(h.tabs[1].url,url,'persistent stale badge does not send us back into the empty cart');
+  assert.equal(h.events.filter(e=>e[0]==='action'&&e[2]==='purchase').length,1);
+  assert.equal(h.db['watch:1'].amazonIgnoreCartBadge,false,'a fresh addition permits cart verification again');
+  assert.equal(h.events.filter(e=>e[0]==='notice').length,0,'empty cart does not spam alerts');
+  let text='Your Amazon Cart is currently empty.';
+  const e={innerText:text,getClientRects:()=>[{}]};
+  global.location={hostname:'www.amazon.com',pathname:'/cart',href:'https://www.amazon.com/cart'};
+  global.getComputedStyle=()=>({visibility:'visible',display:'block'});
+  global.document={querySelector:()=>null,querySelectorAll:s=>s==='p,div,span'?[e]:[]};
+  assert.equal(inspectAmazonPage({store:'Amazon',productId:'B0HJ6F8L6V'}).reason,'emptyCart');
+  e.innerText='Subtotal $0.00';assert.equal(inspectAmazonPage({store:'Amazon',productId:'B0HJ6F8L6V'}).state,'pending','zero subtotal alone never proves empty');
+  console.log('PASS: verified empty cart reloads product, respects interval and ignores stale badge until a new addition');
+})().catch(e=>{console.error(e);process.exitCode=1;});

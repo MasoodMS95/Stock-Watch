@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "Personal Stock Watch",
+  "version": "1.7.0",
+  "minimum_chrome_version": "120",
+  "options_page": "popup.html",
+  "description": "Watch selected product tabs, optionally attempt one cart addition, and notify you. Set intervals in seconds or minutes.",
+  "permissions": ["alarms", "storage", "tabs", "scripting", "notifications"],
+  "optional_host_permissions": ["https://*/*", "http://*/*"],
+  "background": {"service_worker": "background.js"},
+  "action": {"default_popup": "popup.html", "default_title": "Personal Stock Watch"},
+  "icons": {"128": "icon.png"}
+}

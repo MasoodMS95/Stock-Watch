@@ -1,0 +1,33 @@
+const assert=require('node:assert/strict'),vm=require('node:vm');
+const {inspectNintendoCart}=require('./nintendo.js'),{harness}=require('./control-audit-test.cjs');
+const url='https://www.nintendo.com/us/cart/',product='console-121642';
+let disabled=true,rejected=true,clicks=0;
+function node(text='',attrs={}){return {innerText:text,getClientRects:()=>[{}],getAttribute:n=>attrs[n]||null,matches:()=>false,closest:()=>null};}
+const link=node('Console',{href:'/store/products/'+product+'/'}),remove=node('Remove');
+const row={querySelectorAll:()=>[link]};remove.parentElement=row;
+const checkout=node('To secure checkout',{'aria-label':'Proceed to secure checkout'});checkout.matches=()=>disabled;checkout.click=()=>clicks++;
+const error=node('One of the items in your cart is out of stock. Remove it to continue to checkout.');
+const main=node();main.querySelectorAll=s=>s==='button'?[remove,checkout]:rejected?[error]:[];row.parentElement=main;
+global.document={querySelector:()=>main};global.location={origin:'https://www.nintendo.com',pathname:'/us/cart/',href:url};global.getComputedStyle=()=>({visibility:'visible',display:'block'});
+assert.equal(inspectNintendoCart().state,'unavailable');assert.equal(inspectNintendoCart().product,product);
+const queries=main.querySelectorAll;main.querySelectorAll=()=>[];assert.equal(inspectNintendoCart().state,'loading','temporary missing cart row during rendering never pauses');main.querySelectorAll=queries;
+rejected=false;assert.equal(inspectNintendoCart(product,'click','one').state,'blocked');assert.equal(clicks,0);
+disabled=false;assert.equal(inspectNintendoCart(product,'click','one').clicked,true);assert.equal(inspectNintendoCart(product,'click','one').clicked,false);assert.equal(clicks,1);
+assert.equal(inspectNintendoCart('different','click','two').state,'review');
+location.pathname='/us/checkout/';assert.equal(inspectNintendoCart(product,'click','three').state,'other');assert.equal(clicks,1);
+delete global.document;delete global.location;delete global.getComputedStyle;
+(async()=>{
+ const h=await harness();h.add(1,url,{autoCart:true});let state='unavailable';const original=h.chrome.scripting.executeScript;
+ h.chrome.scripting.executeScript=async req=>req.func?.name==='inspectNintendoCart'?[{result:{state,product}}]:original(req);
+ await h.scan(1);assert.equal(h.db['watch:1'].paused,false);assert.equal(h.db['watch:1'].nintendoCartItem,product);
+ h.advance(751);await h.chrome.alarms.onAlarm.fn({name:'refresh:1'});assert.equal(h.events.filter(e=>e[0]==='reload').length,1,'settled unavailable cart refreshes without waiting the saved five seconds');
+ state='ready';await h.scan(1);assert.equal(h.db['watch:1'].pending,true);assert.equal(h.events.filter(e=>e[0]==='action'&&e[2]==='nintendoCheckout').length,1);
+ state='unavailable';await h.scan(1);assert.equal(h.db['watch:1'].paused,false);assert.equal(h.db['watch:1'].pending,false);
+ h.advance(5000);state='ready';await h.scan(1);h.tabs[1].url='https://www.nintendo.com/us/checkout/';await h.scan(1);
+ assert.equal(h.db['watch:1'].paused,true);assert.equal(h.db['watch:1'].pending,false);assert.match(h.db['watch:1'].status,/checkout opened/);
+ const actionCount=h.events.filter(e=>e[0]==='action').length;
+ h.tabs[1].url=url;h.advance(10000);await h.scan(1);await h.chrome.alarms.onAlarm.fn({name:'refresh:1'});
+ assert.equal(h.events.filter(e=>e[0]==='action').length,actionCount,'handoff cannot reactivate from stale refreshes or returning to cart');
+ assert.equal(h.events.filter(e=>e[0]==='notice').length,1,'one handoff alert, none for rejected checkout');
+ console.log('PASS: Nintendo cart recognition, disabled/error safeguards, single entry per token, refresh/retry and permanent handoff until manual resume');
+})().catch(e=>{console.error(e);process.exitCode=1;});

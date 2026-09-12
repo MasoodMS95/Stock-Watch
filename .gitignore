@@ -1,0 +1,8 @@
+node_modules/
+*.zip
+*.log
+stock-watch-log-*.json
+.env
+.env.*
+.DS_Store
+Thumbs.db

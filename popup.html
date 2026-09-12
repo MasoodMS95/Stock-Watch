@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Personal Stock Watch</title><link rel="stylesheet" href="popup.css"></head>
+<body><header><h1>Stock Watch</h1><p>Keep an eye on stock. Finish checkout yourself.</p>
+<small id="loaded-version"></small>
+</header>
+<section class="panel" aria-labelledby="setup-title"><h2 id="setup-title">Watch a product</h2>
+<ol class="quick-steps"><li>Open a product page.</li><li>Choose how often to check.</li><li>Click Watch this page.</li></ol>
+<label for="amount">Check every</label><div class="interval"><input id="amount" aria-label="Interval amount" type="number" min="0" step="any" value="2"><select id="unit" aria-label="Interval unit"><option value="60">Minutes</option><option value="1">Seconds</option></select></div>
+<label class="check"><input id="auto-cart" type="checkbox"> Also try adding one item to my cart</label>
+<small>You finish checkout. Sold-out pages can be watched too.</small>
+<button id="add" class="primary">Watch this page</button>
+<p id="message" role="status" aria-live="polite"></p>
+</section>
+<section aria-labelledby="watches-title"><h2 id="watches-title">Your watches</h2>
+<button id="pause-all">Pause all watches</button>
+<button id="pause-running" class="secondary" hidden>Pause all watches</button>
+<small id="watch-counts"></small>
+<div id="list"></div></section>
+<details><summary>Settings</summary>
+<button id="save-default" class="secondary">Use this interval for new watches</button><small>Any positive interval is accepted. Loading pages and browser throttling can delay checks.</small>
+<label class="check"><input id="automatic-switching" type="checkbox" checked> Automatically select tabs while refreshing</label><small>On: tabs take turns, and an alert pauses all watches. Off: use separate windows; only the alerted watch pauses, while other pages keep checking without taking focus.</small>
+<label>Fulfillment<select id="fulfillment"><option value="auto">Store default</option><option value="pickup">Pickup at saved store</option><option value="shipping">Shipping</option><option value="delivery">Delivery (Walmart)</option></select></label><small>Defaults: pickup for Best Buy; shipping for Amazon, Nintendo, Walmart and GameStop. Walmart also supports local delivery to your saved address.</small>
+<label class="check"><input id="nintendo-auto-password" type="checkbox"> Nintendo cart: click OK when the browser has autofilled my password</label><small>Optional access to accounts.nintendo.com. Password contents are never read or stored. Unfilled passwords and 2FA require you.</small>
+<small>Nintendo cart watches can try secure checkout when it becomes available. Enable “Also try adding one item to my cart” before watching a Nintendo cart. You complete the purchase yourself.</small>
+<details><summary>Advanced setup</summary><label>Custom button selector<input id="selector" placeholder="Leave blank for store detection"></label><p>Override store detection if needed. You can select a visible purchase button, including a disabled one.</p><button id="pick" class="secondary">Choose a specific button</button></details>
+</details>
+<button id="test" class="secondary">Test notification</button>
+<details><summary>Quick start &amp; store links</summary><ol><li>Sign in to the store and open the product you want.</li><li>Open Stock Watch, set an interval, and click Watch this page. Allow access to that store.</li><li>Repeat for other products. Keep Chrome open and your computer awake.</li></ol><p>Built-in store rules are available for the stores below. Button and checkout behavior varies by product; test your watches before relying on them.</p><div id="stores"></div><button id="open-all" class="secondary">Open store websites</button><p>To update: replace the extension files, open Chrome’s Extensions page, and click Reload. Confirm the loaded version above.</p></details>
+<details id="phone-settings"><summary>Phone alerts</summary>
+<p>Optional phone alerts through ntfy. Install the ntfy app on Android or iPhone, then subscribe to your topic below. An iPhone Home Screen web app is another option.</p>
+<button id="phone-toggle" class="secondary">Enable phone alerts</button>
+<label>Your notification topic<input id="phone-topic" readonly autocomplete="off" spellcheck="false"></label>
+<button id="phone-copy" class="secondary">Copy topic</button>
+<ol><li>Enable phone alerts here and allow ntfy.sh access.</li><li>In the ntfy app, subscribe to the exact topic above using ntfy.sh as the server. Or open <a href="https://ntfy.sh/app" target="_blank" rel="noreferrer">ntfy.sh/app</a>; on iPhone, add it to your Home Screen from Safari.</li><li>Allow notifications on your phone.</li><li>Send a test below. Lock your phone and check that the notification appears.</li></ol>
+<button id="phone-test" class="secondary" disabled>Send phone test</button>
+<small id="phone-state" role="status"></small><p id="phone-feedback" role="status"></p>
+<small>Open the ntfy shortcut at least once a week to keep background alerts active. Your PC must remain awake with Chrome open. Focus and notification settings can silence alerts.</small>
+<p>Enabling sends the same alert events as desktop notifications through ntfy.sh. Keep the random topic private: anyone with it can read or send messages. The same event is delivered once; new alert events can send immediately. An Amazon preorder button, price, empty cart or inventory rejection does not trigger an availability alert.</p>
+</details>
+<details id="diagnostic-settings"><summary>Help &amp; troubleshooting logs</summary>
+<small id="diagnostic-state" role="status">Logging on after the extension loads</small>
+<p>Records progress, pause reasons, cart decisions, page errors and gaps. Keeps up to 48 hours, with limits of 6,000 routine entries and 500 incidents. Heavy activity can shorten the retained history.</p>
+<p>On unexpected stops it captures limited page facts: loading state, matching buttons, disabled controls, cart quantity and recognized error categories. It does not capture screenshots, full HTML, form field values or cookies. Logs stay on this PC until you export them.</p>
+<button id="diagnostic-export">Export log</button>
+<button id="diagnostic-toggle" class="secondary">Stop logging</button>
+<button id="diagnostic-clear" class="secondary">Start new log (clears current log)</button>
+<p id="diagnostic-feedback" role="status"></p>
+</details>
+<footer>Keep the browser open and your computer awake. Checks may be delayed by the browser. Re-add tabs after restarting the browser.</footer>
+<script src="stores.js"></script><script src="watch-ui.js"></script><script src="popup.js"></script><script src="phone-ui.js"></script><script src="diagnostics-ui.js"></script></body></html>

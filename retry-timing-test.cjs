@@ -1,0 +1,67 @@
+const assert=require('node:assert/strict'),vm=require('node:vm');
+const {harness}=require('./control-audit-test.cjs');
+(async()=>{
+  const h=await harness();
+  h.add(1,'https://www.walmart.com/ip/console/21002656445',{selector:'',pageReady:false});
+  h.state.resolved={selector:'',status:'Waiting for purchase button'};
+  await h.chrome.alarms.onAlarm.fn({name:'refresh:1'});
+  const first=h.db['watch:1'].lastReload;
+  h.advance(5000);await h.chrome.alarms.onAlarm.fn({name:'refresh:1'});
+  assert.equal(h.db['watch:1'].lastReload-first,5000,'loaded out-of-stock Walmart reloads at five seconds even with no button');
+  assert.equal(h.db['watch:1'].reloadCount,2);
+  h.tabs[1].status='loading';h.advance(5000);await h.chrome.alarms.onAlarm.fn({name:'refresh:1'});
+  assert.equal(h.db['watch:1'].reloadCount,2,'unfinished load is not repeatedly interrupted');
+  assert.match(h.db['watch:1'].status,/still loading/);
+  assert.equal(h.db['watch:1'].next-vm.runInContext('Date.now()',h.context),1000);
+  h.tabs[1].status='complete';h.advance(1000);await h.chrome.alarms.onAlarm.fn({name:'refresh:1'});
+  assert.equal(h.db['watch:1'].reloadCount,3);
+  h.db['watch:1'].retryAt=vm.runInContext('Date.now()+250',h.context);
+  await h.chrome.alarms.onAlarm.fn({name:'refresh:1'});
+  assert.equal(h.db['watch:1'].next-vm.runInContext('Date.now()',h.context),250,'early timer does not stretch a retry to 30 seconds');
+  const a=await harness();a.add(2,'https://www.amazon.com/dp/B0HJ6F8L6V',{autoCart:true});
+  vm.runInContext("PhoneAlerts.enqueue=async (...args)=>{globalThis.phoneEvents.push(args);return true;};globalThis.phoneEvents=[]",a.context);
+  a.state.found=true;
+  for(let cycle=0;cycle<4;cycle++) {
+    a.state.pages[2]={page:'product',state:'pending',hasCartItems:cycle>0,cartUrl:'https://www.amazon.com/cart',title:'Console'};
+    await a.scan(2);assert.equal(a.db['watch:2'].pending,true);
+    assert.equal(a.events.filter(e=>e[0]==='action'&&e[2]==='purchase').length,cycle+1,'each rejected attempt permits one fresh preorder click');
+    await a.scan(2);
+    assert.equal(a.events.filter(e=>e[0]==='action'&&e[2]==='purchase').length,cycle+1,'pending attempt never clicks twice');
+    a.tabs[2].url='https://www.amazon.com/checkout/p/session/itemselect';
+    a.state.pages[2]={page:'checkout',state:'unavailable',reason:cycle%2?'zeroQuantity':'amazonUnavailable'};
+    await a.chrome.tabs.onUpdated.fn(2,{status:'complete'});
+    assert.equal(a.db['watch:2'].retryAt,0);assert.equal(a.db['watch:2'].paused,false);
+    assert.equal(a.db['watch:2'].amazonCheckCartFirst,false);
+  }
+  assert.equal(a.events.filter(e=>e[0]==='notice').length,0,'repeated invalid preorder has no desktop stock alerts');
+  assert.equal(vm.runInContext('phoneEvents.length',a.context),0,'same invalid cycle cannot send phone alerts');
+  a.state.found=false;a.state.pages[2]={page:'product',state:'pending'};await a.scan(2);
+  assert.equal(a.db['watch:2'].pending,false,'disappeared button waits for normal refresh');
+  assert.equal(a.db['watch:2'].next-vm.runInContext('Date.now()',a.context),5000);
+  a.state.found=true;await a.scan(2);
+  a.tabs[2].url='https://www.amazon.com/checkout/p/session/itemselect';
+  for(const step of ['itemselect','shipoptionselect']) {
+    a.state.pages[2]={page:'checkout',state:'confirmationReady',cartItem:true,step:'/checkout/p/session/'+step};
+    await a.chrome.tabs.onUpdated.fn(2,{status:'complete'});
+    const clicks=a.events.filter(e=>e[0]==='action'&&e[2]==='amazonCheckout').length;
+    await a.scan(2);assert.equal(a.events.filter(e=>e[0]==='action'&&e[2]==='amazonCheckout').length,clicks,'same confirmation cannot be clicked twice');
+  }
+  assert.equal(a.db['watch:2'].amazonConfirmations.length,2);
+  a.state.pages[2]={page:'checkout',state:'checkoutReady',cartItem:true};await a.scan(2);a.advance(1500);await a.scan(2);
+  assert.equal(a.db['watch:2'].found,true);assert.equal(a.db['watch:2'].pending,false);
+  assert.equal(a.events.filter(e=>e[0]==='notice').length,1);assert.equal(vm.runInContext('phoneEvents.length',a.context),1);
+  await a.scan(2);assert.equal(vm.runInContext('phoneEvents.length',a.context),1,'final review alert is not repeated');
+  const m=await harness();m.add(3,'https://www.amazon.com/dp/B0HJ6F8L6V',{autoCart:true});
+  m.tabs[3].url='https://www.amazon.com/cart';m.state.pages[3]={page:'cart',state:'cartReady',cartItem:true,title:'Console'};
+  await m.scan(3);assert.equal(m.db['watch:3'].pending,true,'manual cart navigation is adopted');
+  assert.equal(m.events.filter(e=>e[0]==='action'&&e[2]==='purchase').length,0,'manual click never causes a duplicate purchase entry');
+  assert.equal(m.events.filter(e=>e[0]==='action'&&e[2]==='amazonCheckout').length,1);
+  await m.call({type:'pause',id:3});m.state.pages[3]={page:'checkout',state:'confirmationReady',cartItem:true,step:'/checkout/p/s/itemselect'};await m.scan(3);
+  assert.equal(m.events.filter(e=>e[0]==='action'&&e[2]==='amazonCheckout').length,1,'manual pause blocks later confirmations');
+  const migrated=await harness();migrated.add(4,'https://www.amazon.com/dp/B0HJ6F8L6V',{retryAt:Date.now()+900000,status:'Amazon reports unavailable'});
+  migrated.add(5,'https://www.gamestop.com/products/game/451607.html',{paused:true,userPaused:true,retryAt:Date.now()+900000,status:'Store rejected the addition'});
+  await vm.runInContext('migrateRetryDeadlines()',migrated.context);
+  assert.equal(migrated.db['watch:4'].retryAt,0);assert.equal(migrated.db['watch:5'].userPaused,true);
+  for(const x of [h,a,m,migrated])await x.call({type:'pauseAll'});
+  console.log('PASS: five-second missing-button refresh, loading recovery, immediate Amazon retry, silent false-flag cycles, two confirmations, manual continuation and pause, legacy deadline migration');
+})().catch(e=>{console.error(e);process.exitCode=1;});

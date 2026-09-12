@@ -1,0 +1,8 @@
+{
+  "name": "stock-watch",
+  "version": "1.7.0",
+  "private": true,
+  "description": "Product availability alerts and optional guarded cart attempts for Chrome",
+  "scripts": { "test": "node run-tests.cjs" },
+  "engines": { "node": ">=22" }
+}
